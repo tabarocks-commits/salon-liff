@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>予約日時を選ぶ</title>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      background: #f5f5f5;
+      color: #333;
+    }
+
+    header {
+      background: #06c755;
+      color: #fff;
+      text-align: center;
+      padding: 14px;
+      font-size: 17px;
+      font-weight: bold;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    #calendar-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    #calendar-nav button {
+      background: none;
+      border: none;
+      font-size: 20px;
+      color: #06c755;
+      cursor: pointer;
+      padding: 4px 10px;
+    }
+
+    #month-label {
+      font-size: 16px;
+      font-weight: bold;
+    }
+
+    #calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .day-header {
+      text-align: center;
+      font-size: 11px;
+      color: #888;
+      padding: 6px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .day-header.sun { color: #e53935; }
+    .day-header.sat { color: #1565c0; }
+
+    .day-cell {
+      text-align: center;
+      padding: 10px 4px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      position: relative;
+    }
+    .day-cell.empty { cursor: default; }
+    .day-cell.closed { color: #bbb; cursor: default; }
+    .day-cell.today .day-num { background: #06c755; color: #fff; border-radius: 50%; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
+    .day-cell.selected { background: #e8f5e9; border-radius: 4px; }
+    .day-num { font-size: 14px; }
+    .avail-dot { width: 6px; height: 6px; border-radius: 50%; background: #06c755; margin: 3px auto 0; }
+    .avail-dot.none { background: #e0e0e0; }
+
+    #slots-panel {
+      padding: 16px;
+    }
+
+    #slots-panel h2 {
+      font-size: 15px;
+      margin-bottom: 12px;
+      color: #555;
+    }
+
+    #slots-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .slot-btn {
+      padding: 10px 4px;
+      text-align: center;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      border: 2px solid transparent;
+      cursor: pointer;
+    }
+    .slot-btn.available {
+      background: #e8f5e9;
+      border-color: #06c755;
+      color: #1b5e20;
+    }
+    .slot-btn.available:active { background: #c8e6c9; }
+    .slot-btn.booked {
+      background: #fafafa;
+      border-color: #e0e0e0;
+      color: #bbb;
+      cursor: not-allowed;
+      text-decoration: line-through;
+    }
+
+    #loading {
+      text-align: center;
+      padding: 40px;
+      color: #888;
+    }
+
+    #error-msg {
+      text-align: center;
+      padding: 40px;
+      color: #e53935;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<header>予約日時を選んでください</header>
+
+<div id="calendar-nav">
+  <button id="prev-btn">‹</button>
+  <span id="month-label"></span>
+  <button id="next-btn">›</button>
+</div>
+
+<div id="calendar-grid"></div>
+
+<div id="slots-panel">
+  <div id="loading">カレンダーを読み込み中...</div>
+  <div id="error-msg">データの取得に失敗しました。<br>再読み込みしてください。</div>
+  <h2 id="slots-title" style="display:none"></h2>
+  <div id="slots-grid"></div>
+</div>
+
+<script>
+  // ── 設定（GAS デプロイ URL をここに入力）──────────────
+  const GAS_URL = "GAS_DEPLOY_URL_HERE";
+  // ────────────────────────────────────────────────────
+
+  let slotsData = {};
+  let currentYear, currentMonth, selectedDate;
+
+  const today = new Date();
+
+  async function init() {
+    await liff.init({ liffId: "LIFF_ID_HERE" });
+
+    currentYear  = today.getFullYear();
+    currentMonth = today.getMonth() + 1;
+
+    document.getElementById("prev-btn").addEventListener("click", () => changeMonth(-1));
+    document.getElementById("next-btn").addEventListener("click", () => changeMonth(1));
+
+    await loadSlots(currentYear, currentMonth);
+    renderCalendar();
+  }
+
+  async function loadSlots(year, month) {
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("error-msg").style.display = "none";
+    document.getElementById("slots-title").style.display = "none";
+    document.getElementById("slots-grid").innerHTML = "";
+
+    try {
+      const res = await fetch(`${GAS_URL}?action=slots&year=${year}&month=${month}`);
+      slotsData = await res.json();
+      document.getElementById("loading").style.display = "none";
+    } catch (e) {
+      document.getElementById("loading").style.display = "none";
+      document.getElementById("error-msg").style.display = "block";
+    }
+  }
+
+  function changeMonth(delta) {
+    currentMonth += delta;
+    if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+    if (currentMonth < 1)  { currentMonth = 12; currentYear--; }
+    selectedDate = null;
+    loadSlots(currentYear, currentMonth).then(() => renderCalendar());
+  }
+
+  function renderCalendar() {
+    document.getElementById("month-label").textContent =
+      `${currentYear}年 ${currentMonth}月`;
+
+    const grid = document.getElementById("calendar-grid");
+    grid.innerHTML = "";
+
+    const dayNames = ["日","月","火","水","木","金","土"];
+    const classes  = ["sun","","","","","","sat"];
+    dayNames.forEach((d, i) => {
+      const el = document.createElement("div");
+      el.className = "day-header " + classes[i];
+      el.textContent = d;
+      grid.appendChild(el);
+    });
+
+    const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
+    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+
+    for (let i = 0; i < firstDay; i++) {
+      const el = document.createElement("div");
+      el.className = "day-cell empty";
+      grid.appendChild(el);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${currentYear}-${String(currentMonth).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+      const slotInfo = slotsData[dateStr];
+      const isPast = new Date(currentYear, currentMonth - 1, day) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const isToday = dateStr === formatDate(today);
+
+      const el = document.createElement("div");
+      el.className = "day-cell" + (isToday ? " today" : "") + (selectedDate === dateStr ? " selected" : "");
+
+      const numEl = document.createElement("div");
+      numEl.className = "day-num";
+      numEl.textContent = day;
+      el.appendChild(numEl);
+
+      if (!slotInfo || isPast) {
+        el.classList.add("closed");
+      } else {
+        const hasAvail = Object.values(slotInfo).some(v => v);
+        const dot = document.createElement("div");
+        dot.className = "avail-dot" + (hasAvail ? "" : " none");
+        el.appendChild(dot);
+
+        el.addEventListener("click", () => selectDate(dateStr));
+      }
+
+      grid.appendChild(el);
+    }
+  }
+
+  function selectDate(dateStr) {
+    selectedDate = dateStr;
+    renderCalendar();
+    renderSlots(dateStr);
+  }
+
+  function renderSlots(dateStr) {
+    const slotInfo = slotsData[dateStr] || {};
+    const title = document.getElementById("slots-title");
+    const grid  = document.getElementById("slots-grid");
+
+    const [y, m, d] = dateStr.split("-");
+    title.textContent = `${parseInt(m)}月${parseInt(d)}日の空き状況`;
+    title.style.display = "block";
+    grid.innerHTML = "";
+
+    const sortedTimes = Object.keys(slotInfo).sort();
+    if (sortedTimes.length === 0) {
+      grid.innerHTML = "<p style='color:#888;grid-column:span 4'>この日は定休日です</p>";
+      return;
+    }
+
+    sortedTimes.forEach(time => {
+      const available = slotInfo[time];
+      const btn = document.createElement("div");
+      btn.className = "slot-btn " + (available ? "available" : "booked");
+      btn.textContent = available ? `○ ${time}` : `× ${time}`;
+
+      if (available) {
+        btn.addEventListener("click", () => confirmReservation(dateStr, time));
+      }
+      grid.appendChild(btn);
+    });
+
+    title.scrollIntoView({ behavior: "smooth" });
+  }
+
+  async function confirmReservation(dateStr, time) {
+    const datetime = `${dateStr} ${time}`;
+    if (!confirm(`${datetime} で予約を進めますか？`)) return;
+
+    try {
+      await liff.sendMessages([{
+        type: "text",
+        text: `__reserve__${datetime}`
+      }]);
+      liff.closeWindow();
+    } catch (e) {
+      alert("送信に失敗しました。もう一度お試しください。");
+    }
+  }
+
+  function formatDate(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
+
+  init();
+</script>
+</body>
+</html>
