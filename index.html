@@ -164,7 +164,11 @@
   const today = new Date();
 
   async function init() {
-    await liff.init({ liffId: "2010016757-4d9SSigb" });
+    try {
+      await liff.init({ liffId: "2010016757-4d9SSigb" });
+    } catch (e) {
+      console.error("liff.init error:", e);
+    }
 
     currentYear  = today.getFullYear();
     currentMonth = today.getMonth() + 1;
@@ -183,12 +187,17 @@
     document.getElementById("slots-grid").innerHTML = "";
 
     try {
-      const res = await fetch(`${GAS_URL}?action=slots&year=${year}&month=${month}`);
-      slotsData = await res.json();
+      const res = await fetch(`${GAS_URL}?action=slots&year=${year}&month=${month}`, {
+        redirect: "follow",
+      });
+      const text = await res.text();
+      slotsData = JSON.parse(text);
       document.getElementById("loading").style.display = "none";
     } catch (e) {
+      console.error("loadSlots error:", e);
       document.getElementById("loading").style.display = "none";
       document.getElementById("error-msg").style.display = "block";
+      document.getElementById("error-msg").textContent = "エラー: " + e.message;
     }
   }
 
